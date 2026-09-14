@@ -1,5 +1,23 @@
 # Gate CrossEx Cleaner
 
+## Latest Release — v1.0.5
+
+**Стабільний реліз:** `v1.0.5`  
+**Підтримка:** Windows PowerShell 5.1 / PowerShell 7
+
+[**Завантажити Gate CrossEx Cleaner v1.0.5 (ZIP)**](https://github.com/Wexud/Gate-CrossEx-Cleaner/archive/refs/tags/v1.0.5.zip)  
+[Переглянути Release v1.0.5 та примітки до версії](https://github.com/Wexud/Gate-CrossEx-Cleaner/releases/tag/v1.0.5)
+
+Перевірено автоматичними тестами на Windows:
+
+- Windows PowerShell 5.1: **105/105** logic/safety tests + **7/7** native HTTP tests;
+- PowerShell 7: **105/105** logic/safety tests + **7/7** native HTTP tests;
+- перевірені API signing, точність сум, quote validation, swap settlement, transfer status, таймаути та захист від повторних фінансових запитів.
+
+> Перед першим повним запуском рекомендується спочатку виконати режим `-BalancesOnly`. Автоматичні тести не використовували реальні Gate API keys або реальні кошти.
+
+---
+
 **Версія 1.0.5 · Windows PowerShell 5.1 / PowerShell 7**
 
 Допомагає обміняти підтримувані залишки Gate CrossEx на USDT та перевести доступні **CROSSEX USDT на Gate Spot**. Суми визначаються автоматично.
@@ -16,7 +34,9 @@ API Secret вводиться тільки у вікні програми. Ні�
 
 ## Крок 1. Завантажте та розпакуйте
 
-На головній сторінці репозиторію натисніть **Code → Download ZIP**. У Провіднику натисніть правою кнопкою на завантажений ZIP і виберіть **Видобути все / Extract All**.
+На початку цієї сторінки натисніть **«Завантажити Gate CrossEx Cleaner v1.0.5 (ZIP)»**.
+
+Після завантаження у Провіднику натисніть правою кнопкою на ZIP і виберіть **Видобути все / Extract All**.
 
 Відкрийте розпаковану папку. Зайдіть усередину вкладеної папки, якщо вона є. Ви повинні бачити саме файл:
 
@@ -24,7 +44,7 @@ API Secret вводиться тільки у вікні програми. Ні�
 gate_crossex_cleaner.ps1
 ```
 
-Не запускайте скрипт прямо з вікна ZIP-архіву. Назва папки може бути `Gate-CrossEx-Cleaner-main` — перейменовувати її не потрібно.
+Не запускайте скрипт прямо з вікна ZIP-архіву. Назва папки може містити `Gate-CrossEx-Cleaner-1.0.5` — перейменовувати її не потрібно.
 
 ## Крок 2. Відкрийте PowerShell у цій папці
 
