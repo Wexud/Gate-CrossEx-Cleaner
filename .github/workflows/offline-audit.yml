@@ -15,10 +15,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $PSVersionTable
-          if (Test-Path './audit_tests.ps1') { & ./audit_tests.ps1 -ScriptPath './gate_crossex_cleaner.ps1' } else { Write-Host 'Audit infrastructure ready' }
+          Remove-Item Alias:copy -ErrorAction SilentlyContinue
+          & ./audit_tests.ps1 -ScriptPath './gate_crossex_cleaner.ps1'
       - name: PowerShell 7
+        if: always()
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $PSVersionTable
-          if (Test-Path './audit_tests.ps1') { & ./audit_tests.ps1 -ScriptPath './gate_crossex_cleaner.ps1' } else { Write-Host 'Audit infrastructure ready' }
+          Remove-Item Alias:copy -ErrorAction SilentlyContinue
+          & ./audit_tests.ps1 -ScriptPath './gate_crossex_cleaner.ps1'
