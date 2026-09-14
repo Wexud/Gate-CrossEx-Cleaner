@@ -44,25 +44,47 @@ gate_crossex_cleaner.ps1
 
 ---
 
-## Крок 2. Відкрийте PowerShell прямо в цій папці
+## Крок 2. Відкрийте PowerShell ПРЯМО в папці зі скриптом
 
-Відкрийте папку зі скриптом у Провіднику Windows.
+Це важливо.
 
-Натисніть на рядок адреси зверху, введіть:
+1. Відкрийте папку `Gate-CrossEx-Cleaner` у Провіднику Windows.
+2. Клікніть по рядку адреси зверху.
+3. Введіть:
 
 ```text
 powershell
 ```
 
-і натисніть **Enter**.
+4. Натисніть **Enter**.
 
-Відкриється PowerShell уже в потрібній папці.
+Відкриється PowerShell уже в правильній папці.
+
+Перед запуском подивіться на початок рядка PowerShell. Він повинен бути приблизно таким:
+
+```text
+PS C:\Users\ВашеІм'я\Downloads\Gate-CrossEx-Cleaner>
+```
+
+або:
+
+```text
+PS E:\Downloads\Gate-CrossEx-Cleaner>
+```
+
+**Якщо бачите:**
+
+```text
+PS C:\Windows\System32>
+```
+
+ви відкрили PowerShell не в тій папці. Не запускайте скрипт звідти.
 
 ---
 
 ## Крок 3. Спочатку тільки перевірте баланс
 
-Скопіюйте в PowerShell цю команду:
+У PowerShell, відкритому в папці зі скриптом, виконайте:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\gate_crossex_cleaner.ps1 -BalancesOnly
@@ -218,6 +240,50 @@ Transfer SUCCESS
 
 ---
 
+# Якщо бачите помилку: file does not exist
+
+Наприклад:
+
+```text
+The argument '.\gate_crossex_cleaner.ps1' to the -File parameter does not exist
+```
+
+Це означає, що PowerShell відкритий не в папці зі скриптом.
+
+Якщо бачите:
+
+```text
+PS C:\Windows\System32>
+```
+
+закрийте це вікно.
+
+Потім:
+
+1. відкрийте папку `Gate-CrossEx-Cleaner` у Провіднику;
+2. клікніть по адресному рядку;
+3. введіть `powershell`;
+4. натисніть Enter;
+5. повторіть команду запуску.
+
+Або можна вручну перейти в папку командою:
+
+```powershell
+cd "E:\Downloads\Gate-CrossEx-Cleaner"
+```
+
+Шлях у вас може бути інший.
+
+Перевірити, що файл видно:
+
+```powershell
+Get-ChildItem .\gate_crossex_cleaner.ps1
+```
+
+Якщо файл показався — можна запускати скрипт.
+
+---
+
 # Якщо скрипт пише STOP, SKIP або AMBIGUOUS
 
 ### `SKIP`
@@ -269,6 +335,13 @@ Gate обмежує Flash Swap quote до:
 
 Якщо у вас встановлений PowerShell 7, можна використовувати `pwsh` замість `powershell`.
 
+Найпростіше відкрити PowerShell 7 прямо в папці зі скриптом:
+
+1. відкрийте папку у Провіднику;
+2. клікніть по адресному рядку;
+3. введіть `pwsh`;
+4. натисніть Enter.
+
 Перевірка балансу:
 
 ```powershell
@@ -290,9 +363,9 @@ pwsh -NoProfile -File .\gate_crossex_cleaner.ps1
 Скрипт не:
 
 - виводить криптовалюту на зовнішню адресу;
-- не просить seed phrase;
-- не зберігає API Secret у файл;
-- не повторює автоматично операцію, якщо Gate міг уже її прийняти, але результат незрозумілий.
+- просить seed phrase;
+- зберігає API Secret у файл;
+- повторює автоматично операцію, якщо Gate міг уже її прийняти, але результат незрозумілий.
 
 Python та інші програми не потрібні.
 
