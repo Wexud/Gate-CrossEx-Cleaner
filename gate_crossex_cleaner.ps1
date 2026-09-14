@@ -7,7 +7,7 @@ param(
 )
 
 # Gate CrossEx Cleaner
-# Version: 1.0.1
+# Version: 1.0.2
 # Windows PowerShell 5.1 / PowerShell 7+
 # Converts supported CrossEx residual assets to CROSSEX USDT and transfers USDT to Gate SPOT.
 # Does NOT perform blockchain withdrawals.
@@ -24,7 +24,7 @@ $SupportedVenues = @('BINANCE','OKX','GATE','BYBIT','KRAKEN','HYPERLIQUID')
 function D($v,[string]$name='value') {
     if ($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v)) { return [decimal]0 }
     try { return [decimal]::Parse([Convert]::ToString($v,$Inv),[Globalization.NumberStyles]::Float,$Inv) }
-    catch { throw "Gate returned invalid numeric $name: '$v'" }
+    catch { throw "Gate returned invalid numeric ${name}: '$v'" }
 }
 function DS([decimal]$v) { $v.ToString('0.############################',$Inv) }
 function Pct([decimal]$v) { $v.ToString('0.0000',$Inv) + '%' }
@@ -119,7 +119,7 @@ function WaitTransfer([string]$id,[int]$sec=30){$last=$null;for($i=0;$i -lt $sec
 function Yes([string]$q){((Read-Host $q).Trim() -ceq 'YES')}
 
 try {
-    Write-Host '';Write-Host 'Gate CrossEx Cleaner v1.0.1' -ForegroundColor Cyan
+    Write-Host '';Write-Host 'Gate CrossEx Cleaner v1.0.2' -ForegroundColor Cyan
     Write-Host "PowerShell $($PSVersionTable.PSVersion)";Write-Host 'This script does NOT perform blockchain withdrawals.'
     if($MaxQuoteWorseningPercent -lt 0 -or $StablecoinMaxLossPercent -lt 0){throw 'Percentage limits cannot be negative'}
     if($MaxCandidates -lt 1 -or $MaxCandidates -gt 40){throw 'MaxCandidates must be 1..40'}
