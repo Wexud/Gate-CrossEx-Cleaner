@@ -2,11 +2,11 @@ param([string]$ScriptPath = './gate_crossex_cleaner.ps1')
 $ErrorActionPreference = 'Stop'
 $Inv = [Globalization.CultureInfo]::InvariantCulture
 $Source = [IO.File]::ReadAllText((Resolve-Path $ScriptPath).Path)
-# Development-only patch: the final source must contain this delimiter already.
-$Source = $Source.Replace('$Coin:', '${Coin}:')
 $Tokens = $null; $Errors = $null
 $Ast = [System.Management.Automation.Language.Parser]::ParseInput($Source,[ref]$Tokens,[ref]$Errors)
 if ($Errors.Count) { $Errors | Format-List *; throw 'Syntax failure' }
+$Hash = [Security.Cryptography.SHA256]::Create()
+try { [Console]::WriteLine('SOURCE SHA256 (LF): '+([BitConverter]::ToString($Hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($Source.Replace("`r`n","`n"))))).Replace('-','').ToLowerInvariant()) } finally { $Hash.Dispose() }
 $Functions = $Ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)
 foreach ($Fn in $Functions) { . ([scriptblock]::Create($Fn.Extent.Text)) }
 $script:RealUtc = (Get-Command UnixTime).ScriptBlock
@@ -23,7 +23,7 @@ function Throws([scriptblock]$Body,[string]$Pattern='*') {
     try { & $Body | Out-Null } catch { if ($_.Exception.Message -notlike $Pattern) { throw "Unexpected exception: $($_.Exception.Message)" }; return }
     throw 'Expected an exception, but operation was accepted.'
 }
-function Copy($Object) { return ($Object | ConvertTo-Json -Depth 20 | ConvertFrom-Json) }
+function CloneMock($Object) { return ($Object | ConvertTo-Json -Depth 20 | ConvertFrom-Json) }
 function MakeAsset([string]$Venue,[string]$Coin,[string]$Amount) {
     return [pscustomobject]@{exchange_type=$Venue;coin=$Coin;balance=$Amount;available_balance=$Amount;liability='0';upnl='0';futures_initial_margin='0';futures_maintenance_margin='0';borrowing_initial_margin='0';borrowing_maintenance_margin='0'}
 }
@@ -94,7 +94,7 @@ function Invoke-RestMethod {
         '/crossex/accounts' {
             if ($script:Scenario -eq 'account-http-error') { ApiError 'FORBIDDEN' }
             if ($script:Scenario -eq 'settlement-read-error' -and (CountCalls 'POST' '/crossex/convert/orders') -gt 0) { throw 'Mock read timeout after accepted swap' }
-            return Copy $script:Data
+            return CloneMock $script:Data
         }
         '/crossex/open_orders' {
             if ($script:Scenario -eq 'null-list') { return $null }
@@ -103,7 +103,7 @@ function Invoke-RestMethod {
         }
         '/crossex/positions' { return ,$script:Futures }
         '/crossex/margin_positions' { return ,$script:Margins }
-        '/crossex/transfers/coin' { return ,@((Copy $script:Rule)) }
+        '/crossex/transfers/coin' { return ,@((CloneMock $script:Rule)) }
         '/crossex/convert/quote' {
             $script:Qn++
             if ($script:Scenario -eq 'unsupported') { ApiError 'CONVERT_TRADE_QUOTE_FROM_COIN_INVALID_ERROR' }
@@ -123,7 +123,7 @@ function Invoke-RestMethod {
             if ($script:Scenario -eq 'missing-quote-id') { $q.PSObject.Properties.Remove('quote_id') }
             if ($script:Scenario -eq 'invalid-ttl') { $q.valid_ms='garbage' }
             if ($script:Scenario -eq 'expired') { $q.valid_ms='1' }
-            $script:Quotes['q'+$script:Qn]=Copy $q
+            $script:Quotes['q'+$script:Qn]=CloneMock $q
             return $q
         }
         '/crossex/convert/orders' {
@@ -197,7 +197,7 @@ Test 'Empty list preserved' { $x=List '/crossex/open_orders'; Assert ($x -is [ar
 Test 'Null list rejected' { $script:Scenario='null-list'; Throws { SafeAccount 'offline-user' }; NoWrites }
 Test 'Object instead of array rejected' { $script:Scenario='object-list'; Throws { SafeAccount 'offline-user' }; NoWrites }
 Test 'Missing assets rejected' { $script:Data.PSObject.Properties.Remove('assets'); Throws { Account } }
-Test 'Duplicate assets rejected' { $script:Data.assets+=Copy $script:Data.assets[0]; Throws { Account } }
+Test 'Duplicate assets rejected' { $script:Data.assets+=CloneMock $script:Data.assets[0]; Throws { Account } }
 Test 'Missing margin blocks cleaner' { $script:Data.PSObject.Properties.Remove('initial_margin'); Throws { RunCleaner }; NoWrites }
 Test 'Nonzero liability blocks cleaner' { $script:Data.assets[0].liability='1'; Throws { RunCleaner }; NoWrites }
 Test 'Nonzero upnl blocks cleaner' { $script:Data.assets[0].upnl='-1'; Throws { RunCleaner }; NoWrites }
@@ -250,11 +250,24 @@ foreach ($Case in @('pending','empty-history','history-wrong-id','history-wrong-
 Test 'Terminal transfer FAIL distinguished from PENDING' { OnlyUsdt;$script:Scenario='transfer-fail';Throws {RunCleaner} '*Transfer FAIL*';Equal (CountCalls 'POST' '/crossex/transfers') 1;Equal $script:PendingOperation $null }
 Test 'Pending then success confirmed' { OnlyUsdt;$script:Scenario='pending-then-success';RunCleaner;Equal (CountCalls 'POST' '/crossex/transfers') 1;Equal $script:HistoryCount 3 }
 Test 'Balances-only original entrypoint and key cleanup' {
-    $temp=Join-Path $env:TEMP ('gate-offline-'+[guid]::NewGuid().ToString('N')+'.ps1')
-    [IO.File]::WriteAllText($temp,$Source,[Text.Encoding]::ASCII)
     $old=[Net.ServicePointManager]::SecurityProtocol
-    try { & $temp -BalancesOnly; Equal $script:Calls.Count 1; NoWrites; Equal ([Net.ServicePointManager]::SecurityProtocol) $old }
-    finally { Remove-Item $temp -Force }
+    & ([scriptblock]::Create($Source)) -BalancesOnly
+    Equal $script:Calls.Count 1
+    NoWrites
+    Equal $script:ApiKey $null
+    Equal $script:ApiSecret $null
+    Equal ([Net.ServicePointManager]::SecurityProtocol) $old
+}
+Test 'Full original entrypoint including mutex and transfer' {
+    OnlyUsdt
+    & ([scriptblock]::Create($Source))
+    Equal (CountCalls 'POST' '/crossex/transfers') 1
+    Equal $script:ApiKey $null
+    Equal $script:ApiSecret $null
+}
+Test 'Original entrypoint rejects unsafe percent before API call' {
+    Throws { & ([scriptblock]::Create($Source)) -MaxQuoteWorseningPercent 100 } '*Percentage limits*'
+    Equal $script:Calls.Count 0
 }
 [Console]::WriteLine("RESULT: $script:Passed passed; $script:Failed failed. Gate HTTP requests: 0 (all simulated).")
 if ($script:Failed -gt 0) { throw "$script:Failed offline tests failed" }
