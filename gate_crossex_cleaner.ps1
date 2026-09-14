@@ -7,188 +7,735 @@ param(
 )
 
 # Gate CrossEx Cleaner
-# Version: 1.0.3
+# Version: 1.0.4
 # Windows PowerShell 5.1 / PowerShell 7+
 # Converts supported CrossEx residual assets to CROSSEX USDT and transfers USDT to Gate SPOT.
 # Does NOT perform blockchain withdrawals.
 
 $ErrorActionPreference = 'Stop'
-if ($PSVersionTable.PSVersion.Major -lt 5) { throw 'PowerShell 5.1 or newer is required.' }
-try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
+if ($PSVersionTable.PSVersion.Major -lt 5) {
+    throw 'PowerShell 5.1 or newer is required.'
+}
+
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+} catch {}
 
 $ApiHost = 'https://api.gateio.ws'
 $Prefix = '/api/v4'
 $Inv = [Globalization.CultureInfo]::InvariantCulture
 $SupportedVenues = @('BINANCE','OKX','GATE','BYBIT','KRAKEN','HYPERLIQUID')
 
-function D($v,[string]$name='value') {
-    if ($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v)) { return [decimal]0 }
-    try { return [decimal]::Parse([Convert]::ToString($v,$Inv),[Globalization.NumberStyles]::Float,$Inv) }
-    catch { throw "Gate returned invalid numeric ${name}: '$v'" }
-}
-function DS([decimal]$v) { $v.ToString('0.############################',$Inv) }
-function Pct([decimal]$v) { $v.ToString('0.0000',$Inv) + '%' }
-function UnixTime { [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
-function Sha512([string]$s) {
-    $h=[Security.Cryptography.SHA512]::Create(); try { ([BitConverter]::ToString($h.ComputeHash([Text.Encoding]::UTF8.GetBytes($s)))).Replace('-','').ToLowerInvariant() } finally { $h.Dispose() }
-}
-function Hmac512([string]$key,[string]$s) {
-    $h=New-Object Security.Cryptography.HMACSHA512; try { $h.Key=[Text.Encoding]::UTF8.GetBytes($key); ([BitConverter]::ToString($h.ComputeHash([Text.Encoding]::UTF8.GetBytes($s)))).Replace('-','').ToLowerInvariant() } finally { $h.Dispose() }
-}
-function HttpError($e) {
-    $a=@()
-    if($e.Exception.Message){$a+=$e.Exception.Message}
-    if($e.ErrorDetails -and $e.ErrorDetails.Message){$a+=$e.ErrorDetails.Message}
+function D($Value, [string]$Name = 'value') {
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) {
+        return [decimal]0
+    }
+
     try {
-        if($e.Exception.Response){
-            $stream=$e.Exception.Response.GetResponseStream()
-            if($stream){
-                $reader=New-Object IO.StreamReader($stream)
-                try{$body=$reader.ReadToEnd();if(-not [string]::IsNullOrWhiteSpace($body)){$a+=$body}}finally{$reader.Dispose()}
+        return [decimal]::Parse(
+            [Convert]::ToString($Value, $Inv),
+            [Globalization.NumberStyles]::Float,
+            $Inv
+        )
+    }
+    catch {
+        throw "Gate returned invalid numeric ${Name}: '$Value'"
+    }
+}
+
+function DS([decimal]$Value) {
+    return $Value.ToString('0.############################', $Inv)
+}
+
+function Pct([decimal]$Value) {
+    return $Value.ToString('0.0000', $Inv) + '%'
+}
+
+function UnixTime {
+    return [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+}
+
+function Sha512([string]$Text) {
+    $Hash = [Security.Cryptography.SHA512]::Create()
+    try {
+        return ([BitConverter]::ToString(
+            $Hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text))
+        )).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $Hash.Dispose()
+    }
+}
+
+function Hmac512([string]$Key, [string]$Text) {
+    $Hmac = New-Object Security.Cryptography.HMACSHA512
+    try {
+        $Hmac.Key = [Text.Encoding]::UTF8.GetBytes($Key)
+        return ([BitConverter]::ToString(
+            $Hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text))
+        )).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $Hmac.Dispose()
+    }
+}
+
+function HttpError($ErrorRecord) {
+    $Parts = @()
+
+    if ($ErrorRecord.Exception.Message) {
+        $Parts += $ErrorRecord.Exception.Message
+    }
+
+    if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) {
+        $Parts += $ErrorRecord.ErrorDetails.Message
+    }
+
+    try {
+        $Response = $ErrorRecord.Exception.Response
+        if ($null -ne $Response -and $null -ne $Response.GetResponseStream()) {
+            $Reader = New-Object IO.StreamReader($Response.GetResponseStream())
+            try {
+                $Body = $Reader.ReadToEnd()
+                if (-not [string]::IsNullOrWhiteSpace($Body)) {
+                    $Parts += $Body
+                }
+            }
+            finally {
+                $Reader.Dispose()
             }
         }
     } catch {}
-    if(!$a.Count){'Unknown HTTP error'}else{($a|Select-Object -Unique) -join ' | '}
-}
-function Gate([string]$Method,[string]$Path,[string]$Query='',$Body=$null,[bool]$Signed=$true) {
-    $Method=$Method.ToUpperInvariant(); $bodyText=if($null -eq $Body){''}else{$Body|ConvertTo-Json -Compress -Depth 10}
-    $uri="$ApiHost$Prefix$Path"; if($Query){$uri+="?$Query"}
-    $headers=@{Accept='application/json'}
-    if($Signed){
-        $ts=(UnixTime).ToString($Inv); $hash=Sha512 $bodyText
-        $signText=$Method+"`n"+$Prefix+$Path+"`n"+$Query+"`n"+$hash+"`n"+$ts
-        $headers.KEY=$script:ApiKey; $headers.Timestamp=$ts; $headers.SIGN=Hmac512 $script:ApiSecret $signText
+
+    if (-not $Parts.Count) {
+        return 'Unknown HTTP error'
     }
-    $p=@{Method=$Method;Uri=$uri;Headers=$headers;ErrorAction='Stop'}
-    if($null -ne $Body){$p.Body=$bodyText;$p.ContentType='application/json'}
-    try { Invoke-RestMethod @p } catch { throw "Gate API $Method $Path failed: $(HttpError $_)" }
+
+    return ($Parts -join ' | ')
 }
 
-function Account { Gate GET '/crossex/accounts' }
-function OpenOrders { @(Gate GET '/crossex/open_orders') }
-function Asset($a,[string]$venue,[string]$coin) {
-    @($a.assets)|Where-Object{([string]$_.exchange_type).ToUpperInvariant() -eq $venue.ToUpperInvariant() -and ([string]$_.coin).ToUpperInvariant() -eq $coin.ToUpperInvariant()}|Select-Object -First 1
-}
-function NonZero($a) { @($a.assets)|Where-Object{(D $_.balance 'balance') -ne 0 -or (D $_.available_balance 'available_balance') -ne 0} }
-function ShowBalances($a) {
-    $x=@(NonZero $a); Write-Host ''; Write-Host 'Current non-zero CrossEx balances:' -ForegroundColor Cyan
-    if(!$x.Count){Write-Host '  No non-zero balances.';return}
-    Write-Host ('{0,-15} {1,-10} {2,26} {3,26} {4,18}' -f 'ACCOUNT','COIN','BALANCE','AVAILABLE','LIABILITY'); Write-Host ('-'*100)
-    foreach($i in $x){Write-Host ('{0,-15} {1,-10} {2,26} {3,26} {4,18}' -f $i.exchange_type,$i.coin,$i.balance,$i.available_balance,$i.liability)}
-}
-function UsdtAvailable($a) { $x=Asset $a 'CROSSEX' 'USDT'; if($null -eq $x){[decimal]0}else{D $x.available_balance 'CROSSEX USDT available_balance'} }
-function RiskReasons($a) {
-    $r=@(); if((D $a.initial_margin 'initial_margin') -gt 0){$r+="initial_margin=$($a.initial_margin)"}; if((D $a.maintenance_margin 'maintenance_margin') -gt 0){$r+="maintenance_margin=$($a.maintenance_margin)"}
-    foreach($x in @($a.assets)){
-        $n="$($x.exchange_type) $($x.coin)"
-        foreach($f in @('liability','futures_initial_margin','futures_maintenance_margin','borrowing_initial_margin','borrowing_maintenance_margin')){if((D $x.$f $f) -gt 0){$r+="$f $n=$($x.$f)"}}
-        if((D $x.upnl 'upnl') -ne 0){$r+="upnl $n=$($x.upnl)"}
-    }; $r
-}
-function Candidates($a) {
-    $ok=@();$skip=@()
-    foreach($x in @(NonZero $a)){
-        $v=([string]$x.exchange_type).ToUpperInvariant();$c=([string]$x.coin).ToUpperInvariant();$n=D $x.available_balance 'available_balance'
-        if($n -le 0 -or $c -eq 'USDT'){continue}
-        $reason=$null
-        if($v -eq 'CROSSEX'){$reason='CROSSEX itself is not a Flash Swap venue'}
-        elseif($SupportedVenues -notcontains $v){$reason='Flash Swap venue is not supported by Gate'}
-        elseif($v -eq 'HYPERLIQUID' -and $c -ne 'USDC'){$reason='Gate documents HYPERLIQUID_USDC -> CROSSEX_USDT only'}
-        elseif($v -eq 'KRAKEN' -and $c -ne 'USD'){$reason='Gate documents KRAKEN_USD -> CROSSEX_USDT only'}
-        if($reason){$skip+=[pscustomobject]@{Asset=$x;Reason=$reason}}else{$ok+=$x}
+function Gate(
+    [string]$Method,
+    [string]$Path,
+    [string]$Query = '',
+    $Body = $null,
+    [bool]$Signed = $true
+) {
+    $Method = $Method.ToUpperInvariant()
+
+    if ($null -eq $Body) {
+        $BodyText = ''
     }
-    [pscustomobject]@{Candidates=$ok;Skipped=$skip}
+    else {
+        $BodyText = $Body | ConvertTo-Json -Compress -Depth 10
+    }
+
+    $Uri = "$ApiHost$Prefix$Path"
+    if ($Query) {
+        $Uri += "?$Query"
+    }
+
+    $Headers = @{ Accept = 'application/json' }
+
+    if ($Signed) {
+        $Timestamp = (UnixTime).ToString($Inv)
+        $BodyHash = Sha512 $BodyText
+        $SignText = $Method + "`n" + $Prefix + $Path + "`n" + $Query + "`n" + $BodyHash + "`n" + $Timestamp
+
+        $Headers.KEY = $script:ApiKey
+        $Headers.Timestamp = $Timestamp
+        $Headers.SIGN = Hmac512 $script:ApiSecret $SignText
+    }
+
+    $Params = @{
+        Method      = $Method
+        Uri         = $Uri
+        Headers     = $Headers
+        ErrorAction = 'Stop'
+    }
+
+    if ($null -ne $Body) {
+        $Params.Body = $BodyText
+        $Params.ContentType = 'application/json'
+    }
+
+    try {
+        return Invoke-RestMethod @Params
+    }
+    catch {
+        throw "Gate API $Method $Path failed: $(HttpError $_)"
+    }
 }
-function Quote([string]$venue,[string]$coin,[decimal]$amount) {
-    $q=Gate POST '/crossex/convert/quote' '' ([ordered]@{exchange_type=$venue;from_coin=$coin;to_coin='USDT';from_amount=(DS $amount)})
-    if([string]::IsNullOrWhiteSpace([string]$q.quote_id)){throw 'Quote response has no quote_id'}
-    if(([string]$q.to_coin).ToUpperInvariant() -ne 'USDT'){throw 'Quote target is not USDT'}
-    if((D $q.from_amount 'quote.from_amount') -le 0 -or (D $q.to_amount 'quote.to_amount') -le 0){throw 'Quote returned non-positive amount'}
-    $q
+
+function Account {
+    return Gate GET '/crossex/accounts'
 }
-function Rate($q) { (D $q.to_amount 'quote.to_amount')/(D $q.from_amount 'quote.from_amount') }
-function Worse([decimal]$a,[decimal]$b) { if($b -ge $a){[decimal]0}else{(($a-$b)/$a)*100} }
-function StableLoss([decimal]$r) { if($r -ge 1){[decimal]0}else{(1-$r)*100} }
-function ExecuteQuote([string]$id) { Gate POST '/crossex/convert/orders' '' ([ordered]@{quote_id=$id}) }
-function GetOrder([string]$id) { Gate GET ("/crossex/orders/{0}" -f $id) }
-function WaitOrder([string]$id,[int]$sec=30) {
-    $last=$null; for($i=0;$i -lt $sec;$i++){
-        try{$last=GetOrder $id;$s=([string]$last.state).ToUpperInvariant();if(@('FILLED','FAIL','REJECT','CANCELLED') -contains $s){return $last}}catch{}
-        Start-Sleep 1
-    };$last
+
+function OpenOrders {
+    return @(Gate GET '/crossex/open_orders')
 }
-function WaitSettlement([string]$venue,[string]$coin,[decimal]$srcBefore,[decimal]$usdtBefore,[int]$sec=30) {
-    for($i=0;$i -lt $sec;$i++){
-        Start-Sleep 1;$a=Account;$x=Asset $a $venue $coin;$src=if($null -eq $x){[decimal]0}else{D $x.available_balance 'source available_balance'};$u=UsdtAvailable $a
-        if($src -lt $srcBefore -and $u -gt $usdtBefore){return [pscustomobject]@{Settled=$true;SourceNow=$src;UsdtNow=$u}}
-    };[pscustomobject]@{Settled=$false}
+
+function FuturesPositions {
+    return @(Gate GET '/crossex/positions')
 }
-function TransferRule { @(Gate GET '/crossex/transfers/coin' 'coin=USDT' $null $false)|Where-Object{([string]$_.coin).ToUpperInvariant() -eq 'USDT'}|Select-Object -First 1 }
-function RoundDown([decimal]$n,[int]$p){if($p -lt 0 -or $p -gt 28){throw "Invalid precision: $p"};$f=[decimal]1;for($i=0;$i -lt $p;$i++){$f*=10};[decimal]::Floor($n*$f)/$f}
-function Transfer([decimal]$n){Gate POST '/crossex/transfers' '' ([ordered]@{coin='USDT';amount=(DS $n);from='CROSSEX';to='SPOT'})}
-function TransferRows([string]$id){@(Gate GET '/crossex/transfers' ("order_id={0}&limit=10" -f $id))}
-function WaitTransfer([string]$id,[int]$sec=30){$last=$null;for($i=0;$i -lt $sec;$i++){foreach($r in @(TransferRows $id)){if(([string]$r.id) -eq $id){$last=$r;$s=([string]$r.status).ToUpperInvariant();if(@('SUCCESS','FAIL') -contains $s){return $r}}};Start-Sleep 1};$last}
-function Yes([string]$q){((Read-Host $q).Trim() -ceq 'YES')}
+
+function MarginPositions {
+    return @(Gate GET '/crossex/margin_positions')
+}
+
+function Asset($AccountData, [string]$Venue, [string]$Coin) {
+    return @($AccountData.assets) |
+        Where-Object {
+            ([string]$_.exchange_type).ToUpperInvariant() -eq $Venue.ToUpperInvariant() -and
+            ([string]$_.coin).ToUpperInvariant() -eq $Coin.ToUpperInvariant()
+        } |
+        Select-Object -First 1
+}
+
+function NonZero($AccountData) {
+    return @($AccountData.assets) |
+        Where-Object {
+            (D $_.balance 'balance') -ne 0 -or
+            (D $_.available_balance 'available_balance') -ne 0
+        }
+}
+
+function ShowBalances($AccountData) {
+    $Items = @(NonZero $AccountData)
+
+    Write-Host ''
+    Write-Host 'Current non-zero CrossEx balances:' -ForegroundColor Cyan
+
+    if (-not $Items.Count) {
+        Write-Host '  No non-zero balances.'
+        return
+    }
+
+    Write-Host ('{0,-15} {1,-10} {2,26} {3,26} {4,18}' -f 'ACCOUNT','COIN','BALANCE','AVAILABLE','LIABILITY')
+    Write-Host ('-' * 100)
+
+    foreach ($Item in $Items) {
+        Write-Host ('{0,-15} {1,-10} {2,26} {3,26} {4,18}' -f `
+            $Item.exchange_type,
+            $Item.coin,
+            $Item.balance,
+            $Item.available_balance,
+            $Item.liability
+        )
+    }
+}
+
+function UsdtAvailable($AccountData) {
+    $Item = Asset $AccountData 'CROSSEX' 'USDT'
+    if ($null -eq $Item) {
+        return [decimal]0
+    }
+
+    return D $Item.available_balance 'CROSSEX USDT available_balance'
+}
+
+function RiskReasons($AccountData) {
+    $Reasons = @()
+
+    if ((D $AccountData.initial_margin 'initial_margin') -gt 0) {
+        $Reasons += "initial_margin=$($AccountData.initial_margin)"
+    }
+
+    if ((D $AccountData.maintenance_margin 'maintenance_margin') -gt 0) {
+        $Reasons += "maintenance_margin=$($AccountData.maintenance_margin)"
+    }
+
+    foreach ($Item in @($AccountData.assets)) {
+        $Name = "$($Item.exchange_type) $($Item.coin)"
+
+        foreach ($Field in @(
+            'liability',
+            'futures_initial_margin',
+            'futures_maintenance_margin',
+            'borrowing_initial_margin',
+            'borrowing_maintenance_margin'
+        )) {
+            if ((D $Item.$Field $Field) -gt 0) {
+                $Reasons += "$Field $Name=$($Item.$Field)"
+            }
+        }
+
+        if ((D $Item.upnl 'upnl') -ne 0) {
+            $Reasons += "upnl $Name=$($Item.upnl)"
+        }
+    }
+
+    return $Reasons
+}
+
+function Candidates($AccountData) {
+    $Accepted = @()
+    $Skipped = @()
+
+    foreach ($Item in @(NonZero $AccountData)) {
+        $Venue = ([string]$Item.exchange_type).ToUpperInvariant()
+        $Coin = ([string]$Item.coin).ToUpperInvariant()
+        $Amount = D $Item.available_balance 'available_balance'
+
+        if ($Amount -le 0 -or $Coin -eq 'USDT') {
+            continue
+        }
+
+        $Reason = $null
+
+        if ($Venue -eq 'CROSSEX') {
+            $Reason = 'CROSSEX itself is not a Flash Swap venue'
+        }
+        elseif ($SupportedVenues -notcontains $Venue) {
+            $Reason = 'Flash Swap venue is not supported by Gate'
+        }
+
+        if ($Reason) {
+            $Skipped += [pscustomobject]@{
+                Asset  = $Item
+                Reason = $Reason
+            }
+        }
+        else {
+            $Accepted += $Item
+        }
+    }
+
+    return [pscustomobject]@{
+        Candidates = $Accepted
+        Skipped    = $Skipped
+    }
+}
+
+function Quote([string]$Venue, [string]$Coin, [decimal]$Amount) {
+    $Result = Gate POST '/crossex/convert/quote' '' ([ordered]@{
+        exchange_type = $Venue
+        from_coin     = $Coin
+        to_coin       = 'USDT'
+        from_amount   = (DS $Amount)
+    })
+
+    if ([string]::IsNullOrWhiteSpace([string]$Result.quote_id)) {
+        throw 'Quote response has no quote_id'
+    }
+
+    if (([string]$Result.to_coin).ToUpperInvariant() -ne 'USDT') {
+        throw 'Quote target is not USDT'
+    }
+
+    if (([string]$Result.from_coin).ToUpperInvariant() -ne $Coin.ToUpperInvariant()) {
+        throw 'Quote source coin does not match request'
+    }
+
+    if ((D $Result.from_amount 'quote.from_amount') -le 0 -or (D $Result.to_amount 'quote.to_amount') -le 0) {
+        throw 'Quote returned non-positive amount'
+    }
+
+    return $Result
+}
+
+function Rate($QuoteData) {
+    return (D $QuoteData.to_amount 'quote.to_amount') / (D $QuoteData.from_amount 'quote.from_amount')
+}
+
+function Worse([decimal]$PreviewRate, [decimal]$FreshRate) {
+    if ($FreshRate -ge $PreviewRate) {
+        return [decimal]0
+    }
+
+    return (($PreviewRate - $FreshRate) / $PreviewRate) * 100
+}
+
+function StableLoss([decimal]$EffectiveRate) {
+    if ($EffectiveRate -ge 1) {
+        return [decimal]0
+    }
+
+    return (1 - $EffectiveRate) * 100
+}
+
+function ExecuteQuote([string]$QuoteId) {
+    return Gate POST '/crossex/convert/orders' '' ([ordered]@{
+        quote_id = $QuoteId
+    })
+}
+
+function WaitSettlement(
+    [string]$Venue,
+    [string]$Coin,
+    [decimal]$SourceBefore,
+    [decimal]$UsdtBefore,
+    [int]$Seconds = 30
+) {
+    for ($i = 0; $i -lt $Seconds; $i++) {
+        Start-Sleep -Seconds 1
+
+        $CurrentAccount = Account
+        $SourceAsset = Asset $CurrentAccount $Venue $Coin
+
+        if ($null -eq $SourceAsset) {
+            $SourceNow = [decimal]0
+        }
+        else {
+            $SourceNow = D $SourceAsset.available_balance 'source available_balance'
+        }
+
+        $UsdtNow = UsdtAvailable $CurrentAccount
+
+        if ($SourceNow -lt $SourceBefore -and $UsdtNow -gt $UsdtBefore) {
+            return [pscustomobject]@{
+                Settled  = $true
+                SourceNow = $SourceNow
+                UsdtNow  = $UsdtNow
+            }
+        }
+    }
+
+    return [pscustomobject]@{ Settled = $false }
+}
+
+function TransferRule {
+    return @(Gate GET '/crossex/transfers/coin' 'coin=USDT' $null $false) |
+        Where-Object { ([string]$_.coin).ToUpperInvariant() -eq 'USDT' } |
+        Select-Object -First 1
+}
+
+function RoundDown([decimal]$Number, [int]$Precision) {
+    if ($Precision -lt 0 -or $Precision -gt 28) {
+        throw "Invalid precision: $Precision"
+    }
+
+    $Factor = [decimal]1
+    for ($i = 0; $i -lt $Precision; $i++) {
+        $Factor *= 10
+    }
+
+    return [decimal]::Floor($Number * $Factor) / $Factor
+}
+
+function Transfer([decimal]$Amount) {
+    return Gate POST '/crossex/transfers' '' ([ordered]@{
+        coin   = 'USDT'
+        amount = (DS $Amount)
+        from   = 'CROSSEX'
+        to     = 'SPOT'
+    })
+}
+
+function TransferRows([string]$TxId) {
+    return @(Gate GET '/crossex/transfers' ("order_id={0}&limit=10" -f $TxId))
+}
+
+function WaitTransfer([string]$TxId, [int]$Seconds = 30) {
+    $Last = $null
+
+    for ($i = 0; $i -lt $Seconds; $i++) {
+        foreach ($Row in @(TransferRows $TxId)) {
+            if (([string]$Row.id) -eq $TxId) {
+                $Last = $Row
+                $Status = ([string]$Row.status).ToUpperInvariant()
+
+                if (@('SUCCESS','FAIL') -contains $Status) {
+                    return $Row
+                }
+            }
+        }
+
+        Start-Sleep -Seconds 1
+    }
+
+    return $Last
+}
+
+function Yes([string]$Question) {
+    return ((Read-Host $Question).Trim() -ceq 'YES')
+}
 
 try {
-    Write-Host '';Write-Host 'Gate CrossEx Cleaner v1.0.3' -ForegroundColor Cyan
-    Write-Host "PowerShell $($PSVersionTable.PSVersion)";Write-Host 'This script does NOT perform blockchain withdrawals.'
-    if($MaxQuoteWorseningPercent -lt 0 -or $StablecoinMaxLossPercent -lt 0){throw 'Percentage limits cannot be negative'}
-    if($MaxCandidates -lt 1 -or $MaxCandidates -gt 40){throw 'MaxCandidates must be 1..40'}
+    Write-Host ''
+    Write-Host 'Gate CrossEx Cleaner v1.0.4' -ForegroundColor Cyan
+    Write-Host "PowerShell $($PSVersionTable.PSVersion)"
+    Write-Host 'This script does NOT perform blockchain withdrawals.'
 
-    $script:ApiKey=(Read-Host 'Gate CrossEx API Key').Trim();$ss=Read-Host 'Gate CrossEx API Secret (hidden)' -AsSecureString;$b=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss)
-    try{$script:ApiSecret=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($b)}finally{[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b)}
-    if([string]::IsNullOrWhiteSpace($script:ApiKey) -or [string]::IsNullOrWhiteSpace($script:ApiSecret)){throw 'API Key/Secret is empty'}
+    if ($MaxQuoteWorseningPercent -lt 0 -or $StablecoinMaxLossPercent -lt 0) {
+        throw 'Percentage limits cannot be negative'
+    }
 
-    $a=Account;ShowBalances $a
-    if($BalancesOnly){Write-Host '';Write-Host 'Balances-only mode: no financial operations were performed.' -ForegroundColor Green;return}
-    if(([string]$a.account_mode).ToUpperInvariant() -ne 'CROSS_EXCHANGE'){throw "Full cleaner requires account_mode=CROSS_EXCHANGE; got '$($a.account_mode)'"}
+    if ($MaxCandidates -lt 1 -or $MaxCandidates -gt 40) {
+        throw 'MaxCandidates must be 1..40'
+    }
 
-    $risk=@(RiskReasons $a);$oo=@(OpenOrders);if($oo.Count){$risk+="open_orders=$($oo.Count)"}
-    if($risk.Count){Write-Host '';Write-Host 'STOP: active exposure/open orders detected:' -ForegroundColor Red;$risk|ForEach-Object{Write-Host "  - $_"};return}
+    $script:ApiKey = (Read-Host 'Gate CrossEx API Key').Trim()
+    $SecureSecret = Read-Host 'Gate CrossEx API Secret (hidden)' -AsSecureString
+    $Bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureSecret)
 
-    $cr=Candidates $a;$cand=@($cr.Candidates);$skip=@($cr.Skipped)
-    if($skip.Count){Write-Host '';Write-Host 'Skipped before quote:' -ForegroundColor Yellow;foreach($s in $skip){Write-Host "  $($s.Asset.exchange_type) $($s.Asset.coin): $($s.Reason)"}}
-    if($cand.Count -gt $MaxCandidates){throw "Found $($cand.Count) candidates; MaxCandidates=$MaxCandidates"}
+    try {
+        $script:ApiSecret = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($Bstr)
+    }
+    finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($Bstr)
+    }
 
-    $pre=@()
-    if($cand.Count -and (Yes 'Request preview quotes now? Type YES')){
-        foreach($x in $cand){
-            $v=([string]$x.exchange_type).ToUpperInvariant();$c=([string]$x.coin).ToUpperInvariant();$n=D $x.available_balance 'available_balance'
-            Write-Host -NoNewline "$v $c $(DS $n) -> USDT ... "
-            try{$q=Quote $v $c $n;$r=Rate $q;if(@('USDC','USD') -contains $c -and (StableLoss $r) -gt $StablecoinMaxLossPercent){Write-Host 'SKIP stablecoin loss' -ForegroundColor Yellow;continue};$pre+=[pscustomobject]@{Venue=$v;Coin=$c;Rate=$r};Write-Host "OK: $($q.to_amount) USDT" -ForegroundColor Green}catch{Write-Host "SKIP: $($_.Exception.Message)" -ForegroundColor Yellow}
+    if ([string]::IsNullOrWhiteSpace($script:ApiKey) -or [string]::IsNullOrWhiteSpace($script:ApiSecret)) {
+        throw 'API Key/Secret is empty'
+    }
+
+    $CurrentAccount = Account
+    ShowBalances $CurrentAccount
+
+    if ($BalancesOnly) {
+        Write-Host ''
+        Write-Host 'Balances-only mode: no financial operations were performed.' -ForegroundColor Green
+        return
+    }
+
+    if (([string]$CurrentAccount.account_mode).ToUpperInvariant() -ne 'CROSS_EXCHANGE') {
+        throw "Full cleaner requires account_mode=CROSS_EXCHANGE; got '$($CurrentAccount.account_mode)'"
+    }
+
+    $Risks = @(RiskReasons $CurrentAccount)
+    $Orders = @(OpenOrders)
+    $Futures = @(FuturesPositions)
+    $Margins = @(MarginPositions)
+
+    if ($Orders.Count) {
+        $Risks += "open_orders=$($Orders.Count)"
+    }
+
+    if ($Futures.Count) {
+        $Risks += "futures_positions=$($Futures.Count)"
+    }
+
+    if ($Margins.Count) {
+        $Risks += "margin_positions=$($Margins.Count)"
+    }
+
+    if ($Risks.Count) {
+        Write-Host ''
+        Write-Host 'STOP: active exposure/open orders detected:' -ForegroundColor Red
+        $Risks | ForEach-Object { Write-Host "  - $_" }
+        return
+    }
+
+    $CandidateResult = Candidates $CurrentAccount
+    $CandidateList = @($CandidateResult.Candidates)
+    $SkippedList = @($CandidateResult.Skipped)
+
+    if ($SkippedList.Count) {
+        Write-Host ''
+        Write-Host 'Skipped before quote:' -ForegroundColor Yellow
+        foreach ($Skipped in $SkippedList) {
+            Write-Host "  $($Skipped.Asset.exchange_type) $($Skipped.Asset.coin): $($Skipped.Reason)"
         }
     }
 
-    $amb=$false
-    if($pre.Count -and (Yes 'Execute accepted Flash Swaps? Type YES')){
-        foreach($p in $pre){
-            $cur=Account;$x=Asset $cur $p.Venue $p.Coin;if($null -eq $x){continue};$n=D $x.available_balance 'current available_balance';if($n -le 0){continue}
-            try{$q=Quote $p.Venue $p.Coin $n;$r=Rate $q}catch{Write-Host "SKIP fresh quote: $($_.Exception.Message)" -ForegroundColor Yellow;continue}
-            $w=Worse $p.Rate $r;if($w -gt $MaxQuoteWorseningPercent){Write-Host "SKIP $($p.Venue) $($p.Coin): worsening $(Pct $w)" -ForegroundColor Yellow;continue}
-            if(@('USDC','USD') -contains $p.Coin -and (StableLoss $r) -gt $StablecoinMaxLossPercent){Write-Host 'SKIP stablecoin loss' -ForegroundColor Yellow;continue}
-            $u0=UsdtAvailable $cur
-            try{$o=ExecuteQuote ([string]$q.quote_id)}catch{Write-Host "AMBIGUOUS swap POST: $($_.Exception.Message)" -ForegroundColor Red;$amb=$true;break}
-            $id=[string]$o.order_id;if(!$id){Write-Host 'AMBIGUOUS: no order_id' -ForegroundColor Red;$amb=$true;break}
-            Write-Host "Gate accepted Flash Swap. order_id=$id" -ForegroundColor Green
-            $st=WaitOrder $id 30;if($null -eq $st){$amb=$true;break};$state=([string]$st.state).ToUpperInvariant()
-            if(@('FAIL','REJECT','CANCELLED') -contains $state){Write-Host "Swap state=$state reason=$($st.reason)" -ForegroundColor Yellow;continue}
-            if($state -ne 'FILLED' -or ([string]$st.business_type).ToUpperInvariant() -ne 'CONVERT'){Write-Host "AMBIGUOUS order state/type: $state/$($st.business_type)" -ForegroundColor Red;$amb=$true;break}
-            $sett=WaitSettlement $p.Venue $p.Coin $n $u0 30;if(!$sett.Settled){Write-Host 'AMBIGUOUS: FILLED but balance settlement not confirmed' -ForegroundColor Red;$amb=$true;break}
-            Write-Host "Settlement confirmed; CROSSEX USDT $(DS $u0) -> $(DS $sett.UsdtNow)" -ForegroundColor Green
+    if ($CandidateList.Count -gt $MaxCandidates) {
+        throw "Found $($CandidateList.Count) candidates; MaxCandidates=$MaxCandidates"
+    }
+
+    $Previews = @()
+
+    if ($CandidateList.Count -and (Yes 'Request preview quotes now? Type YES')) {
+        foreach ($Item in $CandidateList) {
+            $Venue = ([string]$Item.exchange_type).ToUpperInvariant()
+            $Coin = ([string]$Item.coin).ToUpperInvariant()
+            $Amount = D $Item.available_balance 'available_balance'
+
+            Write-Host -NoNewline "$Venue $Coin $(DS $Amount) -> USDT ... "
+
+            try {
+                $PreviewQuote = Quote $Venue $Coin $Amount
+                $PreviewRate = Rate $PreviewQuote
+
+                if (@('USDC','USD') -contains $Coin) {
+                    $Loss = StableLoss $PreviewRate
+                    if ($Loss -gt $StablecoinMaxLossPercent) {
+                        Write-Host "SKIP: stablecoin loss $(Pct $Loss)" -ForegroundColor Yellow
+                        continue
+                    }
+                }
+
+                $Previews += [pscustomobject]@{
+                    Venue = $Venue
+                    Coin  = $Coin
+                    Rate  = $PreviewRate
+                }
+
+                Write-Host "OK: $($PreviewQuote.to_amount) USDT" -ForegroundColor Green
+            }
+            catch {
+                Write-Host "SKIP: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
         }
     }
 
-    $a=Account;ShowBalances $a;if($amb){Write-Host 'STOP: ambiguous Flash Swap state. Verify Gate manually before rerun.' -ForegroundColor Red;return}
-    $u=UsdtAvailable $a;if($u -le 0){Write-Host 'No CROSSEX USDT available for SPOT transfer.';return}
-    $rule=TransferRule;if($null -eq $rule){throw 'No USDT transfer rule returned'};if([int]$rule.is_disabled -ne 0){Write-Host 'USDT transfer is disabled by Gate.' -ForegroundColor Yellow;return}
-    $prec=[int]$rule.precision;$min=D $rule.min_trans_amount 'min_trans_amount';$fee=D $rule.est_fee 'est_fee';$base=$u;if($fee -gt 0){$base-=$fee};if($base -lt 0){$base=0};$amt=RoundDown $base $prec
-    Write-Host '';Write-Host 'CROSSEX USDT -> SPOT:' -ForegroundColor Cyan;Write-Host "  available=$(DS $u)  transferable=$(DS $amt)  min=$(DS $min)  fee=$(DS $fee)  precision=$prec"
-    if($amt -le 0 -or $amt -lt $min){Write-Host 'Transfer amount below minimum.';return};if(!(Yes "Transfer $(DS $amt) USDT to SPOT? Type YES")){Write-Host 'Transfer cancelled.';return}
-    try{$tr=Transfer $amt}catch{Write-Host "AMBIGUOUS transfer POST: $($_.Exception.Message)" -ForegroundColor Red;return};$tid=[string]$tr.tx_id;if(!$tid){Write-Host 'AMBIGUOUS: no tx_id' -ForegroundColor Red;return}
-    Write-Host "Gate accepted transfer. tx_id=$tid" -ForegroundColor Green
-    try{$row=WaitTransfer $tid 30;if($null -eq $row){Write-Host 'Transfer status timeout; do not retry automatically.' -ForegroundColor Yellow}elseif(([string]$row.status).ToUpperInvariant() -eq 'SUCCESS'){Write-Host "Transfer SUCCESS. actual_receive=$($row.actual_receive) USDT" -ForegroundColor Green}else{Write-Host "Transfer FAIL: $($row.fail_reason)" -ForegroundColor Red}}catch{Write-Host "Status check failed: $($_.Exception.Message). Do not retry automatically." -ForegroundColor Yellow}
-    Write-Host '';Write-Host 'Final CrossEx balances:' -ForegroundColor Cyan;ShowBalances (Account)
+    $Ambiguous = $false
+
+    if ($Previews.Count -and (Yes 'Execute accepted Flash Swaps? Type YES')) {
+        foreach ($Preview in $Previews) {
+            $FreshAccount = Account
+            $Source = Asset $FreshAccount $Preview.Venue $Preview.Coin
+
+            if ($null -eq $Source) {
+                continue
+            }
+
+            $Amount = D $Source.available_balance 'current available_balance'
+            if ($Amount -le 0) {
+                continue
+            }
+
+            try {
+                $FreshQuote = Quote $Preview.Venue $Preview.Coin $Amount
+                $FreshRate = Rate $FreshQuote
+            }
+            catch {
+                Write-Host "SKIP fresh quote: $($_.Exception.Message)" -ForegroundColor Yellow
+                continue
+            }
+
+            $Worsening = Worse $Preview.Rate $FreshRate
+            if ($Worsening -gt $MaxQuoteWorseningPercent) {
+                Write-Host "SKIP $($Preview.Venue) $($Preview.Coin): quote worsened $(Pct $Worsening)" -ForegroundColor Yellow
+                continue
+            }
+
+            if (@('USDC','USD') -contains $Preview.Coin) {
+                $Loss = StableLoss $FreshRate
+                if ($Loss -gt $StablecoinMaxLossPercent) {
+                    Write-Host "SKIP $($Preview.Venue) $($Preview.Coin): stablecoin loss $(Pct $Loss)" -ForegroundColor Yellow
+                    continue
+                }
+            }
+
+            $UsdtBefore = UsdtAvailable $FreshAccount
+
+            try {
+                $Order = ExecuteQuote ([string]$FreshQuote.quote_id)
+            }
+            catch {
+                Write-Host "AMBIGUOUS swap POST: $($_.Exception.Message)" -ForegroundColor Red
+                $Ambiguous = $true
+                break
+            }
+
+            $OrderId = [string]$Order.order_id
+            if ([string]::IsNullOrWhiteSpace($OrderId)) {
+                Write-Host 'AMBIGUOUS: Gate returned no order_id.' -ForegroundColor Red
+                $Ambiguous = $true
+                break
+            }
+
+            Write-Host "Gate accepted Flash Swap. order_id=$OrderId" -ForegroundColor Green
+
+            $Settlement = WaitSettlement $Preview.Venue $Preview.Coin $Amount $UsdtBefore 30
+            if (-not $Settlement.Settled) {
+                Write-Host 'AMBIGUOUS: swap was accepted, but balance settlement was not confirmed in 30 seconds.' -ForegroundColor Red
+                Write-Host 'Do not rerun the cleaner until you check the balances on Gate.' -ForegroundColor Red
+                $Ambiguous = $true
+                break
+            }
+
+            Write-Host "Settlement confirmed; CROSSEX USDT $(DS $UsdtBefore) -> $(DS $Settlement.UsdtNow)" -ForegroundColor Green
+        }
+    }
+
+    $CurrentAccount = Account
+    ShowBalances $CurrentAccount
+
+    if ($Ambiguous) {
+        Write-Host 'STOP: ambiguous Flash Swap state. Verify Gate manually before rerun.' -ForegroundColor Red
+        return
+    }
+
+    $Usdt = UsdtAvailable $CurrentAccount
+    if ($Usdt -le 0) {
+        Write-Host 'No CROSSEX USDT available for SPOT transfer.'
+        return
+    }
+
+    $Rule = TransferRule
+    if ($null -eq $Rule) {
+        throw 'No USDT transfer rule returned'
+    }
+
+    if ([int]$Rule.is_disabled -ne 0) {
+        Write-Host 'USDT transfer is disabled by Gate.' -ForegroundColor Yellow
+        return
+    }
+
+    $Precision = [int]$Rule.precision
+    $Minimum = D $Rule.min_trans_amount 'min_trans_amount'
+    $Fee = D $Rule.est_fee 'est_fee'
+    $TransferAmount = RoundDown $Usdt $Precision
+
+    $EstimatedReceive = $TransferAmount - $Fee
+    if ($EstimatedReceive -lt 0) {
+        $EstimatedReceive = [decimal]0
+    }
+
+    Write-Host ''
+    Write-Host 'CROSSEX USDT -> SPOT:' -ForegroundColor Cyan
+    Write-Host "  available=$(DS $Usdt)"
+    Write-Host "  transfer amount=$(DS $TransferAmount)"
+    Write-Host "  minimum=$(DS $Minimum)"
+    Write-Host "  estimated fee=$(DS $Fee)"
+    Write-Host "  estimated receive=$(DS $EstimatedReceive)"
+    Write-Host "  precision=$Precision"
+
+    if ($TransferAmount -le 0 -or $TransferAmount -lt $Minimum) {
+        Write-Host 'Transfer amount is below the Gate minimum.'
+        return
+    }
+
+    if (-not (Yes "Transfer $(DS $TransferAmount) USDT to SPOT? Type YES")) {
+        Write-Host 'Transfer cancelled.'
+        return
+    }
+
+    try {
+        $TransferResult = Transfer $TransferAmount
+    }
+    catch {
+        Write-Host "AMBIGUOUS transfer POST: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host 'Do not retry automatically. Check Gate first.' -ForegroundColor Red
+        return
+    }
+
+    $TxId = [string]$TransferResult.tx_id
+    if ([string]::IsNullOrWhiteSpace($TxId)) {
+        Write-Host 'AMBIGUOUS: Gate returned no tx_id.' -ForegroundColor Red
+        return
+    }
+
+    Write-Host "Gate accepted transfer. tx_id=$TxId" -ForegroundColor Green
+
+    try {
+        $TransferStatus = WaitTransfer $TxId 30
+
+        if ($null -eq $TransferStatus) {
+            Write-Host 'Transfer status timeout; do not retry automatically.' -ForegroundColor Yellow
+        }
+        elseif (([string]$TransferStatus.status).ToUpperInvariant() -eq 'SUCCESS') {
+            Write-Host "Transfer SUCCESS. actual_receive=$($TransferStatus.actual_receive) USDT" -ForegroundColor Green
+        }
+        else {
+            Write-Host "Transfer FAIL: $($TransferStatus.fail_reason)" -ForegroundColor Red
+        }
+    }
+    catch {
+        Write-Host "Status check failed: $($_.Exception.Message). Do not retry automatically." -ForegroundColor Yellow
+    }
+
+    Write-Host ''
+    Write-Host 'Final CrossEx balances:' -ForegroundColor Cyan
+    ShowBalances (Account)
 }
-catch { Write-Host '';Write-Host "STOP: $($_.Exception.Message)" -ForegroundColor Red }
-finally { $script:ApiSecret=$null;$ss=$null }
+catch {
+    Write-Host ''
+    Write-Host "STOP: $($_.Exception.Message)" -ForegroundColor Red
+}
+finally {
+    $script:ApiSecret = $null
+    $SecureSecret = $null
+}
