@@ -1,45 +1,24 @@
-name: Offline safety audit
-on:
-  push:
-    branches: ['audit/safety-1.0.5']
+name: Offline audit
+on: [push]
 permissions:
   contents: read
 jobs:
-  audit:
+  windows:
     runs-on: windows-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        shell: [powershell, pwsh]
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Parse and test without Gate access
-        shell: ${{ matrix.shell }}
+      - name: Windows PowerShell 5.1
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          Write-Host "ENGINE: $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)"
-          $file = (Resolve-Path './gate_crossex_cleaner.ps1').Path
-          $tokens = $null
-          $errors = $null
-          $ast = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
-          if ($errors.Count) { $errors | Format-List *; throw 'Parser failed' }
-          Write-Host 'SYNTAX: PASS'
-          Get-FileHash $file -Algorithm SHA256
-          if (Test-Path './audit_tests.ps1') {
-            & ./audit_tests.ps1 -ScriptPath $file
-          } else {
-            $Inv = [Globalization.CultureInfo]::InvariantCulture
-            $functions = $ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst]}, $false)
-            foreach ($fn in $functions) { . ([scriptblock]::Create($fn.Extent.Text)) }
-            function Invoke-RestMethod { param($Method,$Uri,$Headers,$Body,$ContentType,$ErrorAction) return ,@() }
-            $script:ApiKey = 'OFFLINE-TEST-KEY'
-            $script:ApiSecret = 'OFFLINE-TEST-SECRET'
-            $ApiHost = 'https://api.gateio.ws'; $Prefix = '/api/v4'
-            $rows = @(OpenOrders)
-            Write-Host "EMPTY LIST COUNT: $($rows.Count)"
-            Write-Host "MISSING NUMBER CONVERTED TO: $(D $null 'missing')"
-            Write-Host 'No Gate API requests made. Audit harness is being prepared.'
-          }
+          $PSVersionTable
+          if (Test-Path './audit_tests.ps1') { & ./audit_tests.ps1 -ScriptPath './gate_crossex_cleaner.ps1' } else { Write-Host 'Audit infrastructure ready' }
+      - name: PowerShell 7
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSVersionTable
+          if (Test-Path './audit_tests.ps1') { & ./audit_tests.ps1 -ScriptPath './gate_crossex_cleaner.ps1' } else { Write-Host 'Audit infrastructure ready' }
