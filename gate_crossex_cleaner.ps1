@@ -228,7 +228,7 @@ function Candidates($AccountData) {
         if ((N $Item 'available_balance') -le 0) { continue }
         if ($Venue -eq 'CROSSEX' -and $Coin -eq 'USDT') { continue }
         if ($Coin -eq 'USDT' -or $SupportedVenues -notcontains $Venue) {
-            Write-Host "SKIP $Venue $Coin: no automatic route to CROSSEX USDT." -ForegroundColor Yellow
+            Write-Host "SKIP $Venue ${Coin}: no automatic route to CROSSEX USDT." -ForegroundColor Yellow
             continue
         }
         $Item
@@ -293,7 +293,7 @@ function WaitSettlement($Before, [string]$Venue, [string]$Coin, $QuoteData, [int
     return $false
 }
 function RoundDown([decimal]$Number, [int]$Precision) {
-    if ($Number -lt 0 -or $Precision -gt 28 -or $Precision -lt 0) { throw 'Invalid amount or precision.' }
+    if ($Number -lt 0 -or $Precision -lt 0 -or $Precision -gt 28) { throw 'Invalid amount or precision.' }
     # String truncation avoids Decimal overflow from amount * 10^precision.
     $Parts = (DS $Number).Split('.')
     if ($Precision -eq 0 -or $Parts.Length -eq 1) { return D $Parts[0] }
