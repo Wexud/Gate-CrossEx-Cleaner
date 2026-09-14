@@ -10,18 +10,28 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Windows PowerShell 5.1
+      - name: Windows PowerShell 5.1 business scenarios
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $PSVersionTable
-          Remove-Item Alias:copy -ErrorAction SilentlyContinue
           & ./audit_tests.ps1 -ScriptPath './gate_crossex_cleaner.ps1'
-      - name: PowerShell 7
+      - name: PowerShell 7 business scenarios
         if: always()
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $PSVersionTable
-          Remove-Item Alias:copy -ErrorAction SilentlyContinue
           & ./audit_tests.ps1 -ScriptPath './gate_crossex_cleaner.ps1'
+      - name: Windows PowerShell 5.1 native HTTP on loopback
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./audit_transport.ps1 -ScriptPath './gate_crossex_cleaner.ps1'
+      - name: PowerShell 7 native HTTP on loopback
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./audit_transport.ps1 -ScriptPath './gate_crossex_cleaner.ps1'
