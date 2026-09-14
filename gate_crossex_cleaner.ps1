@@ -7,7 +7,7 @@ param(
 )
 
 # Gate CrossEx Cleaner
-# Version: 1.0.2
+# Version: 1.0.3
 # Windows PowerShell 5.1 / PowerShell 7+
 # Converts supported CrossEx residual assets to CROSSEX USDT and transfers USDT to Gate SPOT.
 # Does NOT perform blockchain withdrawals.
@@ -28,7 +28,7 @@ function D($v,[string]$name='value') {
 }
 function DS([decimal]$v) { $v.ToString('0.############################',$Inv) }
 function Pct([decimal]$v) { $v.ToString('0.0000',$Inv) + '%' }
-function UnixTime { [int64][Math]::Floor(([DateTime]::UtcNow-[DateTime]'1970-01-01T00:00:00Z').TotalSeconds) }
+function UnixTime { [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
 function Sha512([string]$s) {
     $h=[Security.Cryptography.SHA512]::Create(); try { ([BitConverter]::ToString($h.ComputeHash([Text.Encoding]::UTF8.GetBytes($s)))).Replace('-','').ToLowerInvariant() } finally { $h.Dispose() }
 }
@@ -36,7 +36,19 @@ function Hmac512([string]$key,[string]$s) {
     $h=New-Object Security.Cryptography.HMACSHA512; try { $h.Key=[Text.Encoding]::UTF8.GetBytes($key); ([BitConverter]::ToString($h.ComputeHash([Text.Encoding]::UTF8.GetBytes($s)))).Replace('-','').ToLowerInvariant() } finally { $h.Dispose() }
 }
 function HttpError($e) {
-    $a=@(); if($e.Exception.Message){$a+=$e.Exception.Message}; if($e.ErrorDetails.Message){$a+=$e.ErrorDetails.Message}; if(!$a.Count){'Unknown HTTP error'}else{$a -join ' | '}
+    $a=@()
+    if($e.Exception.Message){$a+=$e.Exception.Message}
+    if($e.ErrorDetails -and $e.ErrorDetails.Message){$a+=$e.ErrorDetails.Message}
+    try {
+        if($e.Exception.Response){
+            $stream=$e.Exception.Response.GetResponseStream()
+            if($stream){
+                $reader=New-Object IO.StreamReader($stream)
+                try{$body=$reader.ReadToEnd();if(-not [string]::IsNullOrWhiteSpace($body)){$a+=$body}}finally{$reader.Dispose()}
+            }
+        }
+    } catch {}
+    if(!$a.Count){'Unknown HTTP error'}else{($a|Select-Object -Unique) -join ' | '}
 }
 function Gate([string]$Method,[string]$Path,[string]$Query='',$Body=$null,[bool]$Signed=$true) {
     $Method=$Method.ToUpperInvariant(); $bodyText=if($null -eq $Body){''}else{$Body|ConvertTo-Json -Compress -Depth 10}
@@ -119,7 +131,7 @@ function WaitTransfer([string]$id,[int]$sec=30){$last=$null;for($i=0;$i -lt $sec
 function Yes([string]$q){((Read-Host $q).Trim() -ceq 'YES')}
 
 try {
-    Write-Host '';Write-Host 'Gate CrossEx Cleaner v1.0.2' -ForegroundColor Cyan
+    Write-Host '';Write-Host 'Gate CrossEx Cleaner v1.0.3' -ForegroundColor Cyan
     Write-Host "PowerShell $($PSVersionTable.PSVersion)";Write-Host 'This script does NOT perform blockchain withdrawals.'
     if($MaxQuoteWorseningPercent -lt 0 -or $StablecoinMaxLossPercent -lt 0){throw 'Percentage limits cannot be negative'}
     if($MaxCandidates -lt 1 -or $MaxCandidates -gt 40){throw 'MaxCandidates must be 1..40'}
