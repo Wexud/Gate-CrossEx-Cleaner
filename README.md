@@ -1,192 +1,302 @@
 # Gate CrossEx Cleaner
 
-PowerShell-скрипт для очищення залишкових активів у Gate CrossEx:
+Скрипт допомагає забрати залишки з Gate CrossEx:
 
-1. читає поточні CrossEx-баланси;
-2. отримує Gate Flash Swap котирування для доступних non-USDT активів;
-3. конвертує підтримувані Gate активи у `CROSSEX USDT` із перевіркою котирування;
-4. переводить доступний `CROSSEX USDT` на звичайний Gate `SPOT`.
+1. знаходить доступні активи в CrossEx;
+2. пробує обміняти підтримувані активи в **USDT** через Gate Flash Swap;
+3. збирає отримані USDT у `CROSSEX USDT`;
+4. переводить USDT з CrossEx на звичайний **Gate Spot**.
 
-Скрипт **не виконує blockchain withdrawal** і не виводить кошти на зовнішню адресу.
+Скрипт **не виводить кошти з Gate на зовнішній гаманець**.
 
-## Вимоги
+---
 
-- Gate CrossEx account;
-- для повного cleaner-режиму: `account_mode = CROSS_EXCHANGE`;
-- Gate API Key / Secret з необхідними CrossEx read/write permissions;
-- Windows PowerShell 5.1 або PowerShell 7+;
-- правильний системний час на ПК.
+## Що потрібно
 
-**Ніколи не додавайте API Key / Secret у репозиторій, Issue, скріншот або повідомлення.**
+- Windows 10/11;
+- Gate CrossEx API Key і API Secret;
+- API-ключ повинен мати права читання і виконання потрібних CrossEx операцій;
+- на CrossEx не повинно бути відкритих ордерів або активних futures/margin позицій.
 
-## Файли
+> **API Secret нікому не надсилайте.** Він вводиться тільки у вашому PowerShell і на екрані не показується.
+
+---
+
+# Як користуватись
+
+## Крок 1. Скачайте скрипт
+
+На цій сторінці GitHub натисніть:
+
+**Code → Download ZIP**
+
+Розпакуйте ZIP у будь-яку папку, наприклад:
 
 ```text
-gate_crossex_cleaner.ps1   Основний скрипт
-README.md                   Інструкція
-.gitignore                  Захист від випадкового commit локальних secret/config файлів
+Downloads\Gate-CrossEx-Cleaner
 ```
 
-## 1. Безпечна перевірка балансів
+У папці має бути файл:
 
-Цей режим нічого не конвертує і не переводить.
+```text
+gate_crossex_cleaner.ps1
+```
 
-### Windows PowerShell 5.1
+---
+
+## Крок 2. Відкрийте PowerShell прямо в цій папці
+
+Відкрийте папку зі скриптом у Провіднику Windows.
+
+Натисніть на рядок адреси зверху, введіть:
+
+```text
+powershell
+```
+
+і натисніть **Enter**.
+
+Відкриється PowerShell уже в потрібній папці.
+
+---
+
+## Крок 3. Спочатку тільки перевірте баланс
+
+Скопіюйте в PowerShell цю команду:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\gate_crossex_cleaner.ps1 -BalancesOnly
 ```
 
-### PowerShell 7
-
-```powershell
-pwsh -NoProfile -File .\gate_crossex_cleaner.ps1 -BalancesOnly
-```
-
 Скрипт попросить:
 
 ```text
-Gate CrossEx API Key
-Gate CrossEx API Secret (hidden)
+Gate CrossEx API Key:
+Gate CrossEx API Secret (hidden):
 ```
 
-Secret вводиться приховано.
+Введіть ваш API Key.
 
-## 2. Повний cleaner
+Потім введіть API Secret. Під час введення Secret символи **не відображаються — це нормально**.
 
-### Windows PowerShell 5.1
+Після цього скрипт покаже ненульові CrossEx-баланси.
+
+Наприклад:
+
+```text
+ACCOUNT         COIN        BALANCE        AVAILABLE
+HYPERLIQUID     USDC        12.23          12.23
+CROSSEX         USDT        5.00           5.00
+```
+
+У режимі `-BalancesOnly` скрипт **нічого не обмінює і нікуди не переводить**.
+
+Якщо баланс показався без помилки — можна переходити до повного запуску.
+
+---
+
+## Крок 4. Запустіть повний режим
+
+У тому ж PowerShell виконайте:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\gate_crossex_cleaner.ps1
 ```
 
-### PowerShell 7
+Знову введіть API Key і API Secret.
+
+Спочатку скрипт перевірить:
+
+- баланси;
+- відкриті ордери;
+- futures позиції;
+- margin позиції;
+- борги/liability.
+
+Якщо є активна позиція або відкритий ордер, скрипт зупиниться і нічого не конвертуватиме.
+
+---
+
+# Що відповідати під час роботи
+
+## 1. Preview котирувань
+
+З'явиться питання:
+
+```text
+Request preview quotes now? Type YES
+```
+
+Введіть:
+
+```text
+YES
+```
+
+На цьому етапі **гроші ще не обмінюються**.
+
+Скрипт лише запитує у Gate, скільки USDT можна отримати за кожен актив.
+
+Наприклад:
+
+```text
+HYPERLIQUID USDC 12.23 -> USDT ... OK: 12.20 USDT
+```
+
+Якщо конкретний актив Gate не підтримує для Flash Swap, буде:
+
+```text
+SKIP
+```
+
+Такий актив просто не чіпається.
+
+---
+
+## 2. Реальний обмін активів у USDT
+
+Після preview з'явиться:
+
+```text
+Execute accepted Flash Swaps? Type YES
+```
+
+Якщо котирування вас влаштовують, введіть:
+
+```text
+YES
+```
+
+**Ось тут уже виконується реальний Flash Swap.**
+
+Перед кожним обміном скрипт бере нове свіже котирування. Якщо ціна стала гіршою більше допустимого ліміту, цей актив буде пропущений.
+
+За замовчуванням допустиме погіршення — **1%**.
+
+Для `USDC` і `USD` також перевіряється відхилення від 1:1.
+
+Після прийнятого swap скрипт перевіряє фактичні баланси: вихідний актив повинен зменшитися, а `CROSSEX USDT` — збільшитися.
+
+---
+
+## 3. Переведення USDT на Gate Spot
+
+Після обмінів скрипт покаже приблизно таке:
+
+```text
+CROSSEX USDT -> SPOT:
+  available=12.21
+  transfer amount=12.21
+  estimated fee=0
+```
+
+Потім запитає:
+
+```text
+Transfer 12.21 USDT to SPOT? Type YES
+```
+
+Для переказу введіть:
+
+```text
+YES
+```
+
+Це внутрішній переказ:
+
+```text
+CrossEx USDT -> Gate Spot USDT
+```
+
+Після успіху буде повідомлення:
+
+```text
+Transfer SUCCESS
+```
+
+Після цього перевірте USDT на Gate у звичайному **Spot Account**.
+
+---
+
+# Якщо скрипт пише STOP, SKIP або AMBIGUOUS
+
+### `SKIP`
+
+Gate не підтримує цей актив для потрібного Flash Swap або котирування не пройшло перевірку. Актив не чіпається.
+
+### `STOP`
+
+Скрипт знайшов умову, за якої продовжувати небезпечно: наприклад відкритий ордер, позицію, борг або неправильний режим CrossEx.
+
+### `AMBIGUOUS`
+
+Gate міг уже прийняти фінансову операцію, але скрипт не зміг однозначно підтвердити її результат.
+
+**Не запускайте скрипт повторно одразу.** Спочатку зайдіть у Gate і перевірте фактичні баланси/історію операцій.
+
+---
+
+# Які біржі підтримуються
+
+Gate Flash Swap API зараз підтримує:
+
+- Binance;
+- OKX;
+- Gate;
+- Bybit;
+- Hyperliquid;
+- Kraken.
+
+`DERIBIT` через цей Flash Swap endpoint не підтримується і буде пропущений.
+
+Скрипт пробує обміняти доступний non-USDT актив у USDT. Якщо саме цей актив Gate не дозволяє обміняти — він буде `SKIP`.
+
+---
+
+# Важливо про ліміт Gate
+
+Gate обмежує Flash Swap quote до:
+
+```text
+100 запитів на день
+```
+
+Тому не запускайте повний cleaner багато разів підряд без потреби.
+
+---
+
+# PowerShell 7
+
+Якщо у вас встановлений PowerShell 7, можна використовувати `pwsh` замість `powershell`.
+
+Перевірка балансу:
+
+```powershell
+pwsh -NoProfile -File .\gate_crossex_cleaner.ps1 -BalancesOnly
+```
+
+Повний запуск:
 
 ```powershell
 pwsh -NoProfile -File .\gate_crossex_cleaner.ps1
 ```
 
-Перед фінансовими операціями скрипт перевіряє, чи немає активної експозиції:
+Звичайний Windows PowerShell 5.1 також підтримується.
 
-- `initial_margin`;
-- `maintenance_margin`;
-- `liability`;
-- `upnl`;
-- futures margin;
-- borrowing margin;
-- відкритих CrossEx orders.
+---
 
-Якщо щось із цього активне — повний cleaner зупиняється.
+# Що скрипт НЕ робить
 
-## Як працює Flash Swap
+Скрипт не:
 
-Скрипт:
+- виводить криптовалюту на зовнішню адресу;
+- не просить seed phrase;
+- не зберігає API Secret у файл;
+- не повторює автоматично операцію, якщо Gate міг уже її прийняти, але результат незрозумілий.
 
-1. знаходить доступні non-USDT активи на підтримуваних Flash Swap venues;
-2. одразу пропускає `DERIBIT`, non-USDC активи `HYPERLIQUID` та non-USD активи `KRAKEN`, які не входять у документовані Gate маршрути до `CROSSEX USDT`;
-3. для решти пробує отримати `POST /crossex/convert/quote` у USDT;
-4. якщо Gate не підтримує конкретний asset — актив просто `SKIP`;
-5. показує preview quote;
-6. перед виконанням просить точне підтвердження `YES`;
-7. бере **новий** короткоживучий quote;
-8. порівнює його з preview quote;
-9. якщо котирування погіршилось сильніше заданого ліміту — `SKIP`;
-10. для `USDC`/`USD` додатково перевіряє втрату від 1:1;
-11. відправляє Flash Swap один раз;
-12. перевіряє `order_id` через `GET /crossex/orders/{order_id}` і чекає кінцевий стан;
-13. після `FILLED` додатково підтверджує settlement через зменшення source balance та збільшення `CROSSEX USDT`.
+Python та інші програми не потрібні.
 
-Якщо Gate вже міг прийняти Flash Swap, але його стан неможливо однозначно підтвердити, скрипт **не повторює операцію** і блокує подальші фінансові дії.
-
-## CROSSEX USDT -> SPOT
-
-Після Flash Swap скрипт:
-
-1. повторно читає `CROSSEX USDT available_balance`;
-2. отримує параметри `GET /crossex/transfers/coin?coin=USDT`;
-3. перевіряє:
-   - `is_disabled`;
-   - `min_trans_amount`;
-   - `est_fee`;
-   - `precision`;
-4. округляє transfer amount **вниз** відповідно до Gate precision;
-5. показує точну суму;
-6. просить окреме підтвердження `YES`;
-7. виконує `CROSSEX -> SPOT`;
-8. перевіряє transfer status через `GET /crossex/transfers?order_id=<tx_id>`.
-
-Статуси Gate:
-
-```text
-PENDING
-SUCCESS
-FAIL
-```
-
-Transfer після можливого прийняття Gate автоматично не повторюється.
-
-## Ліміти котирувань
-
-Gate документує ліміт Flash Swap quote:
-
-```text
-100 requests / day
-```
-
-Cleaner використовує:
-
-- один preview quote;
-- ще один fresh quote перед фактичним swap.
-
-За замовчуванням `MaxCandidates = 40`, але повторні запуски протягом одного дня також використовують денний quote-limit Gate.
-
-## Параметри
-
-```powershell
-.\gate_crossex_cleaner.ps1 `
-    -MaxQuoteWorseningPercent 1.0 `
-    -StablecoinMaxLossPercent 1.0 `
-    -MaxCandidates 40
-```
-
-За замовчуванням:
-
-```text
-MaxQuoteWorseningPercent = 1.0%
-StablecoinMaxLossPercent = 1.0%
-MaxCandidates             = 40
-```
-
-## Запуск із CMD
-
-Це PowerShell-скрипт, але його можна запустити безпосередньо з `cmd.exe`.
-
-Тільки баланси:
-
-```cmd
-powershell -NoProfile -ExecutionPolicy Bypass -File gate_crossex_cleaner.ps1 -BalancesOnly
-```
-
-Повний режим:
-
-```cmd
-powershell -NoProfile -ExecutionPolicy Bypass -File gate_crossex_cleaner.ps1
-```
-
-Python не потрібен.
-
-## Gate API endpoints
-
-```text
-GET  /api/v4/crossex/accounts
-GET  /api/v4/crossex/open_orders
-GET  /api/v4/crossex/orders/{order_id}
-POST /api/v4/crossex/convert/quote
-POST /api/v4/crossex/convert/orders
-GET  /api/v4/crossex/transfers/coin
-POST /api/v4/crossex/transfers
-GET  /api/v4/crossex/transfers
-```
+---
 
 Офіційна документація Gate CrossEx API:
 
